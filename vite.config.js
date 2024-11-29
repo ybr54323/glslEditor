@@ -7,7 +7,7 @@ export default defineConfig({
     root: 'src',
     build: {
         // 构建输出目录
-        outDir: '../dist1',
+        outDir: '../dist',
         // 确保清空输出目录
         emptyOutDir: true,
 
