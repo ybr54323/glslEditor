@@ -20,6 +20,8 @@ import { subscribeMixin } from "./tools/mixin";
 import { saveAs } from "./tools/download";
 import { getJSON } from "./tools/common";
 import CodeMirror from "codemirror";
+import UrlHashCompressor from "./io/UrlHashCompressor";
+import { debounce } from 'lodash'
 
 // // Cross storage for Openframe -- allows restricted access to certain localStorage operations
 // // on the openframe domain
@@ -58,13 +60,13 @@ export default class GlslEditor {
       selector.nodeType === 1
     ) {
       this.container = selector;
-    } 
+    }
     else if (typeof selector === "string") {
       this.container = document.querySelector(selector);
       if (!this.container) {
         throw new Error(`element ${selector} not present`);
       }
-    } 
+    }
     else {
       console.log(
         "Error, type " + typeof selector + " of " + selector + " is unknown"
@@ -90,7 +92,7 @@ export default class GlslEditor {
       let imgList = this.container.getAttribute("data-textures").split(",");
       for (let i in imgList)
         this.options.imgs.push(imgList[i]);
-      
+
     }
 
     // Default Theme
@@ -161,11 +163,16 @@ export default class GlslEditor {
     if (this.options.exportIcon)
       this.export = new ExportIcon(this);
 
+    this.urlHashCompressor = new UrlHashCompressor(this);
+
+    const debouncedSetHashFromContent = debounce(this.setHashFromContent.bind(this), 500)
+
     // EVENTS
     this.editor.on("change", () => {
       if (this.autoupdate) {
         this.update();
       }
+      debouncedSetHashFromContent()
     });
 
     if (this.options.canvas_follow) {
@@ -187,9 +194,9 @@ export default class GlslEditor {
 
     this.editor.on('inputRead', (cm, change) => {
       let cur = cm.getCursor(),
-          token = cm.getTokenAt(cur);
+        token = cm.getTokenAt(cur);
       let line = token.string.trim();
-          
+
       if (line.startsWith('#include')) {
         let path = line.substring(10);
         if (this.lygia_glob === null) {
@@ -215,11 +222,11 @@ export default class GlslEditor {
         if (result.length > 0) {
           CodeMirror.showHint(cm, () => {
             let rta = {
-              list: result, 
+              list: result,
               from: CodeMirror.Pos(lineN, start),
               to: CodeMirror.Pos(lineN, end)
             };
-            
+
             console.log(rta);
             return rta;
           }, {completeSingle: true, alignWithWord: true});
@@ -232,39 +239,56 @@ export default class GlslEditor {
     // there before. Note that there is not really a way of handling unload
     // with our own UI and logic, since this allows for widespread abuse
     // of normal browser functionality.
-    window.addEventListener("beforeunload", (event) => {
-      let content = {};
-      if (
-        this.bufferManager &&
-        Object.keys(this.bufferManager.buffers).length !== 0
-      ) {
-        for (var key in this.bufferManager.buffers) {
-          content[key] = this.bufferManager.buffers[key].getValue();
-        }
-      } else {
-        content[new Date().getTime().toString()] = this.editor.getValue();
-      }
+    // save by hash
+    // window.addEventListener("beforeunload", (event) => {
+    //   let content = {};
+    //   if (
+    //     this.bufferManager &&
+    //     Object.keys(this.bufferManager.buffers).length !== 0
+    //   ) {
+    //     for (var key in this.bufferManager.buffers) {
+    //       content[key] = this.bufferManager.buffers[key].getValue();
+    //     }
+    //   } else {
+    //     content[new Date().getTime().toString()] = this.editor.getValue();
+    //   }
 
-      if (this.options.menu) {
-        LocalStorage.setItem(
-          STORAGE_LAST_EDITOR_CONTENT,
-          JSON.stringify(content)
-        );
-      }
-    });
+    //   if (this.options.menu) {
+    //     LocalStorage.setItem(
+    //       STORAGE_LAST_EDITOR_CONTENT,
+    //       JSON.stringify(content)
+    //     );
+    //   }
+    // });
 
-    if (this.options.menu) {
-      // If there is previus content load it.
-      let oldContent = JSON.parse(
-        LocalStorage.getItem(STORAGE_LAST_EDITOR_CONTENT)
-      );
-      if (oldContent) {
-        for (var key in oldContent) {
-          this.open(oldContent[key], key);
+    if (this.options.menu && window.location.hash) {
+      this.getContentFromHash(oldContent => {
+        try {
+          if (oldContent) {
+            oldContent = JSON.parse(oldContent)
+            for (let key in oldContent) {
+              this.open(oldContent[key], key)
+            }
+          } else {
+            this.new()
+          }
+        } catch (error) {
+          console.warn(error)
+          this.new()
         }
-      } else {
-        this.new();
-      }
+      })
+      // get from hash
+      // // If there is previus content load it.
+      // let oldContent = JSON.parse(
+      //   LocalStorage.getItem(STORAGE_LAST_EDITOR_CONTENT)
+      // );
+      // if (oldContent) {
+      //   for (var key in oldContent) {
+      //     this.open(oldContent[key], key);
+      //   }
+      // } else {
+      //   this.new();
+      // }
     } else {
       this.new();
     }
@@ -306,7 +330,7 @@ export default class GlslEditor {
       if (tabName !== undefined && this.bufferManager !== undefined) {
         this.bufferManager.open(tabName, shader);
         this.bufferManager.select(tabName);
-      } 
+      }
       else {
         this.editor.setValue(shader);
         this.editor.setSize(null, this.editor.getDoc().height + "px");
@@ -399,13 +423,13 @@ export default class GlslEditor {
       focusAll(this.editor);
     }
 
-    if (this.visualDebugger.testingResults.length) 
+    if (this.visualDebugger.testingResults.length)
       this.visualDebugger.clean();
-    
+
     this.shader.canvas.load(
       this.options.frag_header +
-        this.editor.getValue() +
-        this.options.frag_footer
+      this.editor.getValue() +
+      this.options.frag_footer
     );
   }
 
@@ -430,6 +454,32 @@ export default class GlslEditor {
 
   onClosePresentationWindow() {
     this.pWindowOpen = false;
+  }
+
+  setHashFromContent() {
+    let content = {};
+    if (
+      this.bufferManager &&
+      Object.keys(this.bufferManager.buffers).length !== 0
+    ) {
+      for (var key in this.bufferManager.buffers) {
+        content[key] = this.bufferManager.buffers[key].getValue();
+      }
+    } else {
+      content[new Date().getTime().toString()] = this.editor.getValue();
+    }
+
+    if (this.options.menu) {
+      this.urlHashCompressor.setHashFromContent(
+        JSON.stringify(content)
+      )
+
+    }
+  }
+  getContentFromHash(callback) {
+    this.urlHashCompressor.getContentFromHash().then(oldContent => {
+      callback(oldContent)
+    })
   }
 }
 
