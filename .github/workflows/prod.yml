@@ -25,15 +25,11 @@ jobs:
           node-version: ${{ matrix.node-version }}
           cache: "npm"
       - run: npm ci
-      - run: npm run build --if-present
+      - run: npm run build:vite --if-present
 
       - name: Compress and save Docker image as tarball
         run: |
-          echo "before compress"
-          ls -alh
           tar -czvf dist.tar.gz dist
-          echo "after compress"
-          ls -alh
       - name: Upload compressed tarball via SCP
         run: |
           sudo apt-get update

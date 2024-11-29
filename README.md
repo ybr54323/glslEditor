@@ -125,5 +125,5 @@ Special thanks to:
 - [Thomas Hooper](@tdhooper): performance improvements
 
 
-## new feature by yangbingrui
+## New feature by yangbingrui
 - [x] Storing code by path hash.
